@@ -7,35 +7,61 @@
 #include <time.h>
 #include <pthread.h>
 
-#define BUFFER_SIZE 1048576 // 1MB
-#define NUM_THREADS 20
+// Members:
+//  - Anthony Martini : U07666547
+//  - Tanzila Milky : U28749097
+//  - Zubaer Milky : U41010064
+//
+//
 
+// Constants for program configuration
+#define BUFFER_SIZE (1048576) // 1MB buffer size for reading files
+#define NUM_THREADS 20		  // Number of threads for parallel processing
+
+// Function to compare compressed files by index
 int cmp(const void *a, const void *b)
 {
 	return strcmp(*(char **)a, *(char **)b);
 }
 
+// Global variables for file handling
 int n = 0;
 int nfiles = 0;
-char base_path[100];
-// create a single zipped package with all PPM files in lexicographical order
-int total_in = 0, total_out = 0;
+char base_path[100]; // Base directory path
+
+// Statistics for compression
+int total_in = 0;  // Total bytes before compression
+int total_out = 0; // Total bytes after compression
+
 FILE *f_out;
+
+// Thread synchronization
 pthread_mutex_t n_mutex;
 char **files = NULL;
 
+// Structure to store compressed file data
 typedef struct
 {
 	int index;
 	int size;			 // Size of the compressed data
 	unsigned char *data; // Pointer to the compressed data
 } CompressedFile;
+
 CompressedFile *compressed_files;
 
+// Function to compress a single PPM file
 void *process_file(void *arg)
 {
+	// Reused variables for each thread, allocate once
 	int thread_num = *((int *)arg);
 	int local_n;
+	unsigned char buffer_in[BUFFER_SIZE];
+	unsigned char buffer_out[BUFFER_SIZE];
+	z_stream strm;
+	int len;
+	char *full_path;
+	int ret;
+	int nbytes;
 
 	while (1)
 	{
@@ -45,30 +71,25 @@ void *process_file(void *arg)
 			pthread_mutex_unlock(&n_mutex);
 			break; // Exit the loop if all files are processed
 		}
-
 		local_n = n++;					// Get the next index to process, and increment n
 		pthread_mutex_unlock(&n_mutex); // Release the lock
 
 		// Get the full path of the file
-		int len = strlen(base_path) + strlen(files[local_n]) + 2;
-		char *full_path = malloc(len * sizeof(char));
+		len = strlen(base_path) + strlen(files[local_n]) + 2;
+		full_path = malloc(len * sizeof(char));
 		assert(full_path != NULL);
 		strcpy(full_path, base_path);
 		strcat(full_path, files[local_n]);
 
-		unsigned char buffer_in[BUFFER_SIZE];
-		unsigned char buffer_out[BUFFER_SIZE];
-
 		// Load the file into memory
 		FILE *f_in = fopen(full_path, "r");
 		assert(f_in != NULL);
-		int nbytes = fread(buffer_in, sizeof(unsigned char), BUFFER_SIZE, f_in);
+		nbytes = fread(buffer_in, sizeof(unsigned char), BUFFER_SIZE, f_in);
 		fclose(f_in);
 		total_in += nbytes;
 
 		// Compress the file data using zlib
-		z_stream strm;
-		int ret = deflateInit(&strm, 9); // Highest compression level
+		ret = deflateInit(&strm, 9); // Highest compression level
 		assert(ret == Z_OK);
 		strm.avail_in = nbytes;
 		strm.next_in = buffer_in;
@@ -83,12 +104,11 @@ void *process_file(void *arg)
 		int nbytes_zipped = BUFFER_SIZE - strm.avail_out;
 
 		// Store compressed data in the shared array
-		pthread_mutex_lock(&n_mutex); // Lock to safely update the array
+
 		compressed_files[local_n].size = nbytes_zipped;
 		compressed_files[local_n].index = local_n;
 		compressed_files[local_n].data = malloc(nbytes_zipped * sizeof(unsigned char));
 		memcpy(compressed_files[local_n].data, buffer_out, nbytes_zipped);
-		pthread_mutex_unlock(&n_mutex); // Release the lock
 
 		free(full_path); // Free allocated memory for file path
 	}
